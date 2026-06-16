@@ -1,16 +1,26 @@
-import { useCallback } from "react";
+import { useCallback, useRef } from "react";
+import { useA2UI } from "@a2ui/react";
 import { useAppContext, type Message } from "../context/AppContext";
 import { streamChat } from "../lib/streamChat";
+import { messageRouter } from "../lib/messageRouter";
 import MessageList from "./MessageList";
 import ChatInput from "./ChatInput";
 
 /**
- * ChatPanel - 左侧聊天面板主容器
+ * ChatPanelInner - 聊天面板核心逻辑
  *
+ * 在 A2UIProvider 内部，可以安全使用 useA2UI hook。
  * 组合 MessageList + ChatInput，管理消息发送和流式接收逻辑。
+ * 在流式接收循环中调用 messageRouter 将 chunk 分流：
+ * - 文本行 → dispatch APPEND_STREAM（追加到左侧对话气泡）
+ * - A2UI 消息 → processMessages（送入右侧渲染）
  */
-export default function ChatPanel() {
+function ChatPanelInner() {
   const { state, dispatch } = useAppContext();
+  const { processMessages } = useA2UI();
+
+  // 跨 chunk 的行缓冲区，用 ref 避免闭包陈旧问题
+  const lineBufferRef = useRef<string>("");
 
   const handleSend = useCallback(
     async (text: string) => {
@@ -23,10 +33,41 @@ export default function ChatPanel() {
       };
       dispatch({ type: "ADD_MESSAGE", payload: userMessage });
 
-      // 2. 流式接收 AI 回复
+      // 2. 重置行缓冲区
+      lineBufferRef.current = "";
+
+      // 3. 流式接收 AI 回复
       try {
         for await (const chunk of streamChat(text, state.conversationId)) {
-          dispatch({ type: "APPEND_STREAM", payload: chunk });
+          const { textLines, a2uiMessages, remainingBuffer } = messageRouter(
+            chunk,
+            lineBufferRef.current,
+          );
+
+          // 更新缓冲区
+          lineBufferRef.current = remainingBuffer;
+
+          // 文本行追加到左侧对话气泡
+          if (textLines.length > 0) {
+            dispatch({
+              type: "APPEND_STREAM",
+              payload: textLines.join("\n"),
+            });
+          }
+
+          // A2UI 消息送入右侧渲染
+          if (a2uiMessages.length > 0) {
+            processMessages(a2uiMessages);
+          }
+        }
+
+        // 流结束后，处理缓冲区中可能残留的最后一行
+        if (lineBufferRef.current.length > 0) {
+          dispatch({
+            type: "APPEND_STREAM",
+            payload: lineBufferRef.current,
+          });
+          lineBufferRef.current = "";
         }
       } catch (err) {
         console.error("流式聊天出错:", err);
@@ -35,7 +76,7 @@ export default function ChatPanel() {
         dispatch({ type: "FINISH_STREAM" });
       }
     },
-    [state.conversationId, dispatch],
+    [state.conversationId, dispatch, processMessages],
   );
 
   return (
@@ -57,3 +98,5 @@ export default function ChatPanel() {
     </div>
   );
 }
+
+export default ChatPanelInner;
