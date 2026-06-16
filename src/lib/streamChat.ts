@@ -59,8 +59,9 @@ export async function* streamChat(
   }
 
   const client = new OpenAI({
-    baseURL: "http://localhost:18789/v1",
+    baseURL: window.location.origin + "/v1",
     apiKey: token,
+    dangerouslyAllowBrowser: true,
   });
 
   const messages: ChatCompletionCreateParamsBase["messages"] = [];
