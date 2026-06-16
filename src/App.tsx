@@ -26,14 +26,14 @@ function AppInner({
   processMessagesRef.current = processMessages;
 
   return (
-    <div className="flex h-screen w-screen bg-gray-50">
+    <div className="flex flex-col md:flex-row h-screen w-screen bg-gray-50">
       {/* 左侧聊天面板 */}
-      <aside className="w-[400px] shrink-0 border-r border-gray-200">
+      <aside className="w-full md:w-1/2 shrink-0 border-b md:border-b-0 md:border-r border-gray-200">
         <ChatPanel />
       </aside>
 
       {/* 右侧 A2UI 面板 */}
-      <main className="flex-1 overflow-hidden">
+      <main className="w-full md:w-1/2 overflow-hidden">
         <A2UIPanel />
       </main>
     </div>
