@@ -5,7 +5,7 @@ import type { ChatCompletionCreateParamsBase } from "openai/resources/chat/compl
  * 流式聊天配置选项
  */
 export interface StreamChatOptions {
-  /** 模型名称，默认使用 Gateway 端配置的默认模型 */
+  /** OpenClaw Gateway Agent ID（如 openclaw/storyboard），默认使用 openclaw/storyboard */
   model?: string;
   /**
    * 用户标识，用于 OpenClaw Gateway 的 session 管理。
@@ -81,7 +81,7 @@ export async function* streamChat(
 
   const stream = await client.chat.completions.create(
     {
-      model: options?.model ?? "openclaw",
+      model: options?.model ?? "openclaw/storyboard",
       messages,
       stream: true,
       ...(user !== undefined && { user }),

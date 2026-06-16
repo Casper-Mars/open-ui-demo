@@ -5,10 +5,15 @@ import type { ServerToClientMessage } from "@a2ui/react";
  * 一个 JSON 对象只要包含其中至少一个字段，即被识别为 A2UI 消息。
  */
 const A2UI_MESSAGE_KEYS = new Set([
+  // v0.8 格式
   "beginRendering",
   "surfaceUpdate",
   "dataModelUpdate",
   "deleteSurface",
+  // v0.9 格式
+  "createSurface",
+  "updateComponents",
+  "updateDataModel",
 ]);
 
 /**
@@ -21,6 +26,48 @@ export interface MessageRouterResult {
   a2uiMessages: ServerToClientMessage[];
   /** 跨 chunk 的不完整行缓冲区（最后一行不以 \n 结尾） */
   remainingBuffer: string;
+}
+
+/**
+ * 将 v0.9 格式的 A2UI 消息转换为 v0.8 兼容格式。
+ * storyboard agent 返回 v0.9 格式（createSurface/updateComponents），
+ * 但 @a2ui/react processMessages 只接受 v0.8 schema。
+ */
+function convertV09ToV08(obj: Record<string, unknown>): Record<string, unknown> {
+  const result = { ...obj };
+
+  // createSurface → beginRendering
+  if ("createSurface" in result) {
+    const cs = result.createSurface as Record<string, unknown>;
+    result.beginRendering = {
+      surfaceId: cs.surfaceId,
+      catalogId: cs.catalogId,
+      root: "root",
+      styles: {},
+    };
+    delete result.createSurface;
+  }
+
+  // updateComponents → surfaceUpdate
+  if ("updateComponents" in result) {
+    const uc = result.updateComponents as Record<string, unknown>;
+    result.surfaceUpdate = {
+      surfaceId: uc.surfaceId,
+      components: uc.components,
+    };
+    delete result.updateComponents;
+  }
+
+  // updateDataModel → dataModelUpdate
+  if ("updateDataModel" in result) {
+    result.dataModelUpdate = result.updateDataModel;
+    delete result.updateDataModel;
+  }
+
+  // 移除 version 字段
+  delete result.version;
+
+  return result;
 }
 
 /**
@@ -83,7 +130,8 @@ export function messageRouter(
       // 确保解析结果是对象（非 null、非原始值）
       if (parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)) {
         if (isA2UIMessage(parsed as Record<string, unknown>)) {
-          a2uiMessages.push(parsed as ServerToClientMessage);
+          const converted = convertV09ToV08(parsed as Record<string, unknown>);
+          a2uiMessages.push(converted as ServerToClientMessage);
           continue;
         }
       }
