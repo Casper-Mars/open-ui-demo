@@ -65,10 +65,12 @@ export default function ChatPanel({
         }
 
         // 流结束后，处理缓冲区中可能残留的最后一行
-        if (lineBufferRef.current.length > 0) {
+        // 去掉 __A2UI_BLOCK__ 前缀（如果流在 a2ui 块内结束）
+        const finalBuffer = lineBufferRef.current.replace(/^__A2UI_BLOCK__/, "");
+        if (finalBuffer.length > 0) {
           dispatch({
             type: "APPEND_STREAM",
-            payload: lineBufferRef.current,
+            payload: finalBuffer,
           });
           lineBufferRef.current = "";
         }

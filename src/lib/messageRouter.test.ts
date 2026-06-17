@@ -461,6 +461,116 @@ describe("messageRouter", () => {
       });
     });
 
+    // ── 跨多行 JSON 消息解析 ──
+
+    it("跨多行的 updateComponents 消息被正确解析", () => {
+      const input = [
+        "```a2ui",
+        JSON.stringify({ version: "v0.9", createSurface: { surfaceId: "test_surface", catalogId: basicCatalog.id } }),
+        // 模拟跨多行的 updateComponents：components 数组跨多行
+        '{"version":"v0.9","updateComponents":{"surfaceId":"test_surface","components":[',
+        '{"component":"Column","id":"root","children":["title","button"]},',
+        '{"component":"Text","id":"title","text":"联调测试","variant":"heading"},',
+        '{"component":"Button","id":"button","text":"点击我","variant":"primary"}',
+        ']}}',
+        "```",
+      ].join("\n") + "\n";
+
+      const result = messageRouter(input);
+      expect(result.a2uiMessages).toHaveLength(2);
+      expect(result.a2uiMessages[0]).toHaveProperty("createSurface");
+      expect(result.a2uiMessages[1]).toHaveProperty("updateComponents");
+      const uc = result.a2uiMessages[1].updateComponents!;
+      expect(uc.surfaceId).toBe("test_surface");
+      expect(uc.components).toHaveLength(3);
+      expect(uc.components![0]).toEqual({ component: "Column", id: "root", children: ["title", "button"] });
+      expect(uc.components![1]).toEqual({ component: "Text", id: "title", text: "联调测试", variant: "heading" });
+      expect(uc.components![2]).toEqual({ component: "Button", id: "button", text: "点击我", variant: "primary" });
+    });
+
+    it("跨多行的 JSON 消息（只有 2 行）被正确解析", () => {
+      const input = [
+        "```a2ui",
+        '{"version":"v0.9","updateComponents":{"surfaceId":"s1","components":[',
+        '{"component":"Text","id":"t1","text":"hello"}]}}',
+        "```",
+      ].join("\n") + "\n";
+
+      const result = messageRouter(input);
+      expect(result.a2uiMessages).toHaveLength(1);
+      expect(result.a2uiMessages[0]).toHaveProperty("updateComponents");
+      expect(result.a2uiMessages[0].updateComponents!.components).toHaveLength(1);
+    });
+
+    it("跨 chunk 的多行 JSON 累积缓冲区被正确传递", () => {
+      // chunk1: ```a2ui + createSurface + updateComponents 开头
+      const chunk1 = [
+        "```a2ui",
+        JSON.stringify({ version: "v0.9", createSurface: { surfaceId: "s1", catalogId: basicCatalog.id } }),
+        '{"version":"v0.9","updateComponents":{"surfaceId":"s1","components":[',
+        '{"component":"Column","id":"root","children":["t1"]},',
+      ].join("\n") + "\n";
+
+      const r1 = messageRouter(chunk1);
+      expect(r1.a2uiMessages).toHaveLength(1); // createSurface 已解析
+      expect(r1.a2uiMessages[0]).toHaveProperty("createSurface");
+      // 仍在 a2ui 块内，且有 JSON 累积
+      expect(r1.remainingBuffer).toContain("__A2UI_BLOCK__");
+      expect(r1.remainingBuffer).toContain("__JSON_ACCUM__");
+
+      // chunk2: 剩余行 + 结束标记
+      const chunk2 = [
+        '{"component":"Text","id":"t1","text":"hello"}]}}',
+        "```",
+      ].join("\n") + "\n";
+
+      const r2 = messageRouter(chunk2, r1.remainingBuffer);
+      expect(r2.a2uiMessages).toHaveLength(1);
+      expect(r2.a2uiMessages[0]).toHaveProperty("updateComponents");
+      expect(r2.a2uiMessages[0].updateComponents!.components).toHaveLength(2);
+      expect(r2.remainingBuffer).toBe("");
+    });
+
+    it("跨 chunk 的多行 JSON 累积 + 不完整行同时存在", () => {
+      // chunk1: ```a2ui + 跨行 JSON 开头（不以 \n 结尾）
+      const chunk1 = [
+        "```a2ui",
+        '{"version":"v0.9","updateComponents":{"surfaceId":"s1","components":[',
+        '{"component":"Text","id":"t1","text":"hel',
+      ].join("\n");
+
+      const r1 = messageRouter(chunk1);
+      expect(r1.a2uiMessages).toHaveLength(0);
+      // 应有 JSON 累积 + 不完整行
+      expect(r1.remainingBuffer).toContain("__JSON_ACCUM__");
+      expect(r1.remainingBuffer).toContain("__A2UI_BLOCK__");
+
+      // chunk2: 不完整行的后半部分 + 结束
+      const chunk2 = [
+        'lo"}]}}',
+        "```",
+      ].join("\n") + "\n";
+
+      const r2 = messageRouter(chunk2, r1.remainingBuffer);
+      expect(r2.a2uiMessages).toHaveLength(1);
+      expect(r2.a2uiMessages[0]).toHaveProperty("updateComponents");
+      expect(r2.a2uiMessages[0].updateComponents!.components).toHaveLength(1);
+    });
+
+    it("单行 JSONL 在 a2ui 块内仍然正常工作（无回归）", () => {
+      const input = [
+        "```a2ui",
+        JSON.stringify({ version: "v0.9", createSurface: { surfaceId: "s1", catalogId: basicCatalog.id } }),
+        JSON.stringify({ version: "v0.9", updateComponents: { surfaceId: "s1", components: [{ id: "btn", component: "Button" }] } }),
+        "```",
+      ].join("\n") + "\n";
+
+      const result = messageRouter(input);
+      expect(result.a2uiMessages).toHaveLength(2);
+      expect(result.a2uiMessages[0]).toHaveProperty("createSurface");
+      expect(result.a2uiMessages[1]).toHaveProperty("updateComponents");
+    });
+
     it("a2ui 块内空行被跳过", () => {
       const input = [
         "```a2ui",

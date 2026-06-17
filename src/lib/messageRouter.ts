@@ -19,6 +19,13 @@ const A2UI_MESSAGE_KEYS = new Set([
 const A2UI_BLOCK_MARKER = "__A2UI_BLOCK__";
 
 /**
+ * Buffer 中用于标记"当前有未完成的 JSON 累积"的前缀。
+ * 格式：__JSON_ACCUM__<base64 编码的累积 JSON 内容>\n<其他 buffer 内容>
+ * 使用 base64 编码避免累积内容中的换行符与分隔符冲突。
+ */
+const JSON_ACCUM_MARKER = "__JSON_ACCUM__";
+
+/**
  * messageRouter 的返回类型。
  */
 export interface MessageRouterResult {
@@ -127,22 +134,60 @@ function processNormalLine(
  * 处理 IN_A2UI_BLOCK 状态下的行。
  * 检测 ``` 结束标记，将块内行解析为 A2UI 消息。
  *
- * @returns 新的状态、该行产生的 A2UI 消息（如果有）、以及是否需要丢弃该行
+ * 支持跨多行的 JSON 消息：当单行无法解析为完整 JSON 时，
+ * 将内容累积到 jsonAccumulator 中，直到能解析出完整的 A2UI 消息。
+ *
+ * @param line - 当前行
+ * @param jsonAccumulator - 当前累积的 JSON 内容（跨行累积）
+ * @returns 新的状态、该行产生的 A2UI 消息（如果有）、以及更新后的累积缓冲区
  */
 function processA2UIBlockLine(
   line: string,
+  jsonAccumulator: string,
 ): {
   newState: "NORMAL" | "IN_A2UI_BLOCK";
   a2uiMessage: A2uiMessage | null;
+  jsonAccumulator: string;
 } {
   // 检测 ``` 结束标记
   if (line.trimStart() === "```") {
-    return { newState: "NORMAL", a2uiMessage: null };
+    // 如果有未完成的累积，尝试最后解析一次
+    if (jsonAccumulator.length > 0) {
+      const msg = tryParseA2UILine(jsonAccumulator);
+      return { newState: "NORMAL", a2uiMessage: msg, jsonAccumulator: "" };
+    }
+    return { newState: "NORMAL", a2uiMessage: null, jsonAccumulator: "" };
   }
 
-  // 在 a2ui 块内，尝试解析为 A2UI 消息
-  const msg = tryParseA2UILine(line);
-  return { newState: "IN_A2UI_BLOCK", a2uiMessage: msg };
+  // 先尝试单行解析（处理标准 JSONL 行，如 createSurface）
+  const singleLineMsg = tryParseA2UILine(line);
+  if (singleLineMsg !== null) {
+    // 单行解析成功 → 返回消息，清空累积缓冲区
+    return { newState: "IN_A2UI_BLOCK", a2uiMessage: singleLineMsg, jsonAccumulator: "" };
+  }
+
+  // 单行解析失败，将当前行追加到累积缓冲区
+  const accumulated = jsonAccumulator.length > 0
+    ? jsonAccumulator + "\n" + line
+    : line;
+
+  // 尝试解析累积的 JSON（处理跨多行的消息）
+  const accumulatedMsg = tryParseA2UILine(accumulated);
+  if (accumulatedMsg !== null) {
+    // 累积解析成功 → 返回消息，清空缓冲区
+    return { newState: "IN_A2UI_BLOCK", a2uiMessage: accumulatedMsg, jsonAccumulator: "" };
+  }
+
+  // 检查当前行是否为合法的 JSON 片段（以 { 或 " 开头），是则累积
+  // 非 JSON 行（如纯文本）不累积，直接跳过
+  const trimmed = line.trim();
+  if (trimmed.startsWith("{") || trimmed.startsWith('"') || trimmed.startsWith("]") || trimmed.startsWith("}")) {
+    // JSON 片段 → 继续累积
+    return { newState: "IN_A2UI_BLOCK", a2uiMessage: null, jsonAccumulator: accumulated };
+  }
+
+  // 非 JSON 行 → 跳过，保留已有累积
+  return { newState: "IN_A2UI_BLOCK", a2uiMessage: null, jsonAccumulator: jsonAccumulator };
 }
 
 /**
@@ -169,10 +214,24 @@ export function messageRouter(
   const textLines: string[] = [];
   const a2uiMessages: A2uiMessage[] = [];
 
-  // 从 buffer 中提取 a2ui 块状态
+  // 从 buffer 中提取 a2ui 块状态和 JSON 累积状态
+  // 注意：必须先提取 JSON_ACCUM（因为它在 A2UI_BLOCK_MARKER 之前），
+  // 再检查 A2UI_BLOCK_MARKER
   let state: "NORMAL" | "IN_A2UI_BLOCK" = "NORMAL";
   let actualBuffer = buffer;
+  let jsonAccumulator = "";
 
+  // 先提取 JSON 累积状态（base64 编码），因为它在 buffer 最前面
+  if (actualBuffer.startsWith(JSON_ACCUM_MARKER)) {
+    const markerEnd = actualBuffer.indexOf("\n");
+    if (markerEnd !== -1) {
+      const base64Content = actualBuffer.slice(JSON_ACCUM_MARKER.length, markerEnd);
+      jsonAccumulator = decodeURIComponent(escape(atob(base64Content)));
+      actualBuffer = actualBuffer.slice(markerEnd + 1);
+    }
+  }
+
+  // 再提取 a2ui 块状态
   if (actualBuffer.startsWith(A2UI_BLOCK_MARKER)) {
     state = "IN_A2UI_BLOCK";
     actualBuffer = actualBuffer.slice(A2UI_BLOCK_MARKER.length);
@@ -208,8 +267,12 @@ export function messageRouter(
       }
     } else {
       // IN_A2UI_BLOCK
-      const { newState, a2uiMessage } = processA2UIBlockLine(line);
+      const { newState, a2uiMessage, jsonAccumulator: newAccum } = processA2UIBlockLine(
+        line,
+        jsonAccumulator,
+      );
       state = newState;
+      jsonAccumulator = newAccum;
       if (a2uiMessage !== null) {
         a2uiMessages.push(a2uiMessage);
       }
@@ -220,6 +283,11 @@ export function messageRouter(
   let remainingBuffer = remainingContent;
   if (state === "IN_A2UI_BLOCK") {
     remainingBuffer = A2UI_BLOCK_MARKER + remainingContent;
+    // 如果有未完成的 JSON 累积，也保存到 buffer（base64 编码避免换行冲突）
+    if (jsonAccumulator.length > 0) {
+      const encoded = btoa(unescape(encodeURIComponent(jsonAccumulator)));
+      remainingBuffer = JSON_ACCUM_MARKER + encoded + "\n" + remainingBuffer;
+    }
   }
 
   return { textLines, a2uiMessages, remainingBuffer };
