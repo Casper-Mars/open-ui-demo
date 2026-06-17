@@ -1,5 +1,6 @@
-import { useCallback, useRef } from "react";
-import { A2UIProvider, useA2UI, type OnActionCallback } from "@a2ui/react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { A2uiSurface, basicCatalog, MarkdownContext } from "@a2ui/react/v0_9";
+import { MessageProcessor, type SurfaceModel } from "@a2ui/web_core/v0_9";
 import { AppProvider, useAppContext, type Message } from "./context/AppContext";
 import { streamChat } from "./lib/streamChat";
 import { messageRouter } from "./lib/messageRouter";
@@ -7,45 +8,28 @@ import ChatPanel from "./components/ChatPanel";
 import A2UIPanel from "./components/A2UIPanel";
 
 /**
- * AppInner - A2UIProvider 内部的布局组件
- *
- * 负责：
- * 1. 布局（左侧 ChatPanel + 右侧 A2UIPanel）
- * 2. 通过 ref 将 useA2UI 的 processMessages 暴露给外层的 onAction 回调
+ * 简单的 Markdown 渲染函数，用于 MarkdownContext.Provider。
+ * 将 markdown 字符串渲染为 HTML。
  */
-function AppInner({
-  processMessagesRef,
-}: {
-  processMessagesRef: React.MutableRefObject<
-    ((messages: Parameters<ReturnType<typeof useA2UI>["processMessages"]>[0]) => void) | null
-  >;
-}) {
-  const { processMessages } = useA2UI();
-
-  // 将 processMessages 写入 ref，供外层 onAction 使用
-  processMessagesRef.current = processMessages;
-
-  return (
-    <div className="flex flex-col md:flex-row h-screen w-screen bg-gray-50">
-      {/* 左侧聊天面板 */}
-      <aside className="w-full md:w-1/2 shrink-0 border-b md:border-b-0 md:border-r border-gray-200">
-        <ChatPanel />
-      </aside>
-
-      {/* 右侧 A2UI 面板 */}
-      <main className="w-full md:w-1/2 overflow-hidden">
-        <A2UIPanel />
-      </main>
-    </div>
-  );
+function renderMarkdown(markdown: string): Promise<string> {
+  // 简单的 markdown → HTML 转换
+  const html = markdown
+    .replace(/### (.+)/g, "<h3>$1</h3>")
+    .replace(/## (.+)/g, "<h2>$1</h2>")
+    .replace(/# (.+)/g, "<h1>$1</h1>")
+    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+    .replace(/\*(.+?)\*/g, "<em>$1</em>")
+    .replace(/`(.+?)`/g, "<code>$1</code>")
+    .replace(/\n/g, "<br>");
+  return Promise.resolve(html);
 }
 
 /**
  * AppWithA2UI - AppProvider 内部组件，可以安全使用 useAppContext
  *
  * 负责：
- * 1. 定义 onAction 回调（需要 useAppContext）
- * 2. 通过 ref 桥接 A2UIProvider 内外的 processMessages
+ * 1. 创建 MessageProcessor 并管理 surfaces 状态
+ * 2. 定义 onAction 回调（需要 useAppContext）
  *
  * onAction 回调逻辑：
  * 1. 将 action 包装为 { userAction: action } 的 JSON 字符串
@@ -55,17 +39,12 @@ function AppInner({
 function AppWithA2UI() {
   const { state, dispatch } = useAppContext();
 
-  // 通过 ref 桥接：外层 onAction 需要访问 A2UIProvider 内部的 processMessages
-  const processMessagesRef = useRef<
-    ((messages: Parameters<ReturnType<typeof useA2UI>["processMessages"]>[0]) => void) | null
-  >(null);
-
   // 跨 chunk 的行缓冲区（用 ref 避免闭包陈旧问题）
   const lineBufferRef = useRef<string>("");
 
-  // onAction 回调：用户操作 A2UI 组件时触发
-  const onAction: OnActionCallback = useCallback(
-    async (action) => {
+  // 创建 MessageProcessor，处理用户 action
+  const processor = useMemo(() => {
+    return new MessageProcessor([basicCatalog], async (action) => {
       // 1. 将 action 包装为 { userAction: action } 的 JSON 字符串
       const userMessage = JSON.stringify({ userAction: action });
 
@@ -73,7 +52,7 @@ function AppWithA2UI() {
       const actionMessage: Message = {
         id: crypto.randomUUID(),
         role: "user",
-        content: `[A2UI Action] ${action.userAction?.actionName ?? "unknown"}`,
+        content: `[A2UI Action] ${(action as Record<string, unknown>).userAction?.actionName ?? "unknown"}`,
         timestamp: Date.now(),
       };
       dispatch({ type: "ADD_MESSAGE", payload: actionMessage });
@@ -99,9 +78,9 @@ function AppWithA2UI() {
             });
           }
 
-          // A2UI 消息送入右侧渲染
-          if (a2uiMessages.length > 0 && processMessagesRef.current) {
-            processMessagesRef.current(a2uiMessages);
+          // A2UI 消息送入 processor 处理
+          if (a2uiMessages.length > 0) {
+            processor.processMessages(a2uiMessages);
           }
         }
 
@@ -122,14 +101,41 @@ function AppWithA2UI() {
       } finally {
         dispatch({ type: "FINISH_STREAM" });
       }
-    },
-    [state.conversationId, dispatch],
+    });
+  }, [state.conversationId, dispatch]);
+
+  // 管理 surfaces 状态
+  const [surfaces, setSurfaces] = useState<SurfaceModel[]>(() =>
+    Array.from(processor.model.surfacesMap.values()),
   );
 
+  useEffect(() => {
+    const sub1 = processor.onSurfaceCreated((surface) => {
+      setSurfaces((prev) => [...prev, surface]);
+    });
+    const sub2 = processor.onSurfaceDeleted((id) => {
+      setSurfaces((prev) => prev.filter((s) => s.id !== id));
+    });
+    return () => {
+      sub1.unsubscribe();
+      sub2.unsubscribe();
+    };
+  }, [processor]);
+
   return (
-    <A2UIProvider onAction={onAction}>
-      <AppInner processMessagesRef={processMessagesRef} />
-    </A2UIProvider>
+    <MarkdownContext.Provider value={renderMarkdown}>
+      <div className="flex flex-col md:flex-row h-screen w-screen bg-gray-50">
+        {/* 左侧聊天面板 */}
+        <aside className="w-full md:w-1/2 shrink-0 border-b md:border-b-0 md:border-r border-gray-200">
+          <ChatPanel processor={processor} />
+        </aside>
+
+        {/* 右侧 A2UI 面板 */}
+        <main className="w-full md:w-1/2 overflow-hidden">
+          <A2UIPanel surfaces={surfaces} />
+        </main>
+      </div>
+    </MarkdownContext.Provider>
   );
 }
 
@@ -138,9 +144,9 @@ function AppWithA2UI() {
  *
  * 架构：
  *   AppProvider（全局状态）
- *     └── AppWithA2UI（使用 useAppContext，定义 onAction）
- *           └── A2UIProvider（A2UI 上下文）
- *                 └── AppInner（布局 + 暴露 processMessages 给 onAction）
+ *     └── AppWithA2UI（使用 useAppContext，创建 MessageProcessor + 管理 surfaces）
+ *           ├── ChatPanel（接收 processor prop）
+ *           └── A2UIPanel（接收 surfaces 数组）
  */
 function App() {
   return (

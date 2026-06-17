@@ -1,21 +1,19 @@
-import { useA2UI, A2UIRenderer } from "@a2ui/react";
+import { A2uiSurface } from "@a2ui/react/v0_9";
+import type { SurfaceModel } from "@a2ui/web_core/v0_9";
 
 /**
  * A2UIPanel - 右侧 A2UI 渲染面板
  *
- * 使用 @a2ui/react 的 useA2UI hook 获取所有 surface，
- * 并通过 A2UIRenderer 逐一渲染。
+ * 通过 props 接收 surfaces 数组，使用 @a2ui/react/v0_9 的 A2uiSurface 逐一渲染。
  * 无 surface 时显示空状态提示，多个 surface 时可滚动查看。
- *
- * 必须在 A2UIProvider 内部使用。
  */
-export default function A2UIPanel() {
-  const { getSurfaces } = useA2UI();
-  const surfaces = getSurfaces();
-  const surfaceIds = Array.from(surfaces.keys());
-
+export default function A2UIPanel({
+  surfaces,
+}: {
+  surfaces: SurfaceModel[];
+}) {
   // 空状态：没有任何 surface
-  if (surfaceIds.length === 0) {
+  if (surfaces.length === 0) {
     return (
       <div className="flex items-center justify-center h-full p-8">
         <div className="text-center text-gray-400 max-w-xs">
@@ -43,11 +41,10 @@ export default function A2UIPanel() {
   // 有 surface：全部渲染，可滚动
   return (
     <div className="h-full overflow-y-auto p-4 space-y-4">
-      {surfaceIds.map((surfaceId) => (
-        <A2UIRenderer
-          key={surfaceId}
-          surfaceId={surfaceId}
-          className="a2ui-surface-container"
+      {surfaces.map((surface) => (
+        <A2uiSurface
+          key={surface.id}
+          surface={surface}
         />
       ))}
     </div>

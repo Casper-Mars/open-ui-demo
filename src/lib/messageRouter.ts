@@ -1,19 +1,14 @@
-import type { ServerToClientMessage } from "@a2ui/react";
+import type { A2uiMessage } from "@a2ui/web_core/v0_9";
 
 /**
  * A2UI 消息类型判断的字段名集合。
  * 一个 JSON 对象只要包含其中至少一个字段，即被识别为 A2UI 消息。
  */
 const A2UI_MESSAGE_KEYS = new Set([
-  // v0.8 格式
-  "beginRendering",
-  "surfaceUpdate",
-  "dataModelUpdate",
-  "deleteSurface",
-  // v0.9 格式
   "createSurface",
   "updateComponents",
   "updateDataModel",
+  "deleteSurface",
 ]);
 
 /**
@@ -28,57 +23,15 @@ const A2UI_BLOCK_MARKER = "__A2UI_BLOCK__";
 export interface MessageRouterResult {
   /** 纯文本行（非 A2UI 消息），追加到左侧对话气泡 */
   textLines: string[];
-  /** A2UI 消息数组，送入右侧渲染 */
-  a2uiMessages: ServerToClientMessage[];
+  /** A2UI 消息数组（v0.9 格式），送入右侧渲染 */
+  a2uiMessages: A2uiMessage[];
   /** 跨 chunk 的不完整行缓冲区（可能携带 a2ui 块状态标记） */
   remainingBuffer: string;
 }
 
 /**
- * 将 v0.9 格式的 A2UI 消息转换为 v0.8 兼容格式。
- * storyboard agent 返回 v0.9 格式（createSurface/updateComponents），
- * 但 @a2ui/react processMessages 只接受 v0.8 schema。
- */
-function convertV09ToV08(obj: Record<string, unknown>): Record<string, unknown> {
-  const result = { ...obj };
-
-  // createSurface → beginRendering
-  if ("createSurface" in result) {
-    const cs = result.createSurface as Record<string, unknown>;
-    result.beginRendering = {
-      surfaceId: cs.surfaceId,
-      catalogId: cs.catalogId,
-      root: "root",
-      styles: {},
-    };
-    delete result.createSurface;
-  }
-
-  // updateComponents → surfaceUpdate
-  if ("updateComponents" in result) {
-    const uc = result.updateComponents as Record<string, unknown>;
-    result.surfaceUpdate = {
-      surfaceId: uc.surfaceId,
-      components: uc.components,
-    };
-    delete result.updateComponents;
-  }
-
-  // updateDataModel → dataModelUpdate
-  if ("updateDataModel" in result) {
-    result.dataModelUpdate = result.updateDataModel;
-    delete result.updateDataModel;
-  }
-
-  // 移除 version 字段
-  delete result.version;
-
-  return result;
-}
-
-/**
  * 判断一个已解析的 JSON 对象是否为 A2UI 消息。
- * 只要对象包含 beginRendering / surfaceUpdate / dataModelUpdate / deleteSurface
+ * 只要对象包含 createSurface / updateComponents / updateDataModel / deleteSurface
  * 中至少一个字段，即视为 A2UI 消息。
  */
 function isA2UIMessage(obj: Record<string, unknown>): boolean {
@@ -89,10 +42,10 @@ function isA2UIMessage(obj: Record<string, unknown>): boolean {
 }
 
 /**
- * 尝试将一行文本解析为 A2UI 消息。
- * 返回解析并转换后的消息，如果该行不是 A2UI 消息则返回 null。
+ * 尝试将一行文本解析为 A2UI 消息（v0.9 格式）。
+ * 返回解析后的消息，如果该行不是 A2UI 消息则返回 null。
  */
-function tryParseA2UILine(line: string): ServerToClientMessage | null {
+function tryParseA2UILine(line: string): A2uiMessage | null {
   try {
     const parsed = JSON.parse(line);
     if (
@@ -101,8 +54,7 @@ function tryParseA2UILine(line: string): ServerToClientMessage | null {
       !Array.isArray(parsed)
     ) {
       if (isA2UIMessage(parsed as Record<string, unknown>)) {
-        const converted = convertV09ToV08(parsed as Record<string, unknown>);
-        return converted as ServerToClientMessage;
+        return parsed as A2uiMessage;
       }
     }
   } catch {
@@ -124,7 +76,7 @@ function processNormalLine(
 ): {
   newState: "NORMAL" | "IN_A2UI_BLOCK";
   textLine: string | null;
-  a2uiMessage: ServerToClientMessage | null;
+  a2uiMessage: A2uiMessage | null;
 } {
   // 检测 ```a2ui 开始标记（支持行首可能有空格）
   if (line.trimStart().startsWith("```a2ui")) {
@@ -155,7 +107,7 @@ function processA2UIBlockLine(
   line: string,
 ): {
   newState: "NORMAL" | "IN_A2UI_BLOCK";
-  a2uiMessage: ServerToClientMessage | null;
+  a2uiMessage: A2uiMessage | null;
 } {
   // 检测 ``` 结束标记
   if (line.trimStart() === "```") {
@@ -189,7 +141,7 @@ export function messageRouter(
   buffer: string = "",
 ): MessageRouterResult {
   const textLines: string[] = [];
-  const a2uiMessages: ServerToClientMessage[] = [];
+  const a2uiMessages: A2uiMessage[] = [];
 
   // 从 buffer 中提取 a2ui 块状态
   let state: "NORMAL" | "IN_A2UI_BLOCK" = "NORMAL";

@@ -20,30 +20,34 @@ describe("messageRouter", () => {
 
   // ── 验收标准 2：纯 A2UI JSONL 流式返回 → 全部在右侧渲染，左侧不显示 JSON 原文 ──
 
-  it("A2UI beginRendering 消息被识别并分流到 a2uiMessages", () => {
+  it("A2UI createSurface 消息被识别并分流到 a2uiMessages", () => {
     const json = JSON.stringify({
-      beginRendering: { surfaceId: "main", catalogId: "default" },
+      version: "v0.9",
+      createSurface: { surfaceId: "main", catalogId: "default" },
     });
     const result = messageRouter(json + "\n");
     expect(result.textLines).toHaveLength(0);
     expect(result.a2uiMessages).toHaveLength(1);
     expect(result.a2uiMessages[0]).toEqual({
-      beginRendering: { surfaceId: "main", catalogId: "default" },
+      version: "v0.9",
+      createSurface: { surfaceId: "main", catalogId: "default" },
     });
   });
 
-  it("A2UI surfaceUpdate 消息被识别并分流到 a2uiMessages", () => {
+  it("A2UI updateComponents 消息被识别并分流到 a2uiMessages", () => {
     const json = JSON.stringify({
-      surfaceUpdate: { surfaceId: "main", components: [] },
+      version: "v0.9",
+      updateComponents: { surfaceId: "main", components: [] },
     });
     const result = messageRouter(json + "\n");
     expect(result.textLines).toHaveLength(0);
     expect(result.a2uiMessages).toHaveLength(1);
   });
 
-  it("A2UI dataModelUpdate 消息被识别并分流到 a2uiMessages", () => {
+  it("A2UI updateDataModel 消息被识别并分流到 a2uiMessages", () => {
     const json = JSON.stringify({
-      dataModelUpdate: { surfaceId: "main", path: "/msg", value: "hello" },
+      version: "v0.9",
+      updateDataModel: { surfaceId: "main", path: "/msg", value: "hello" },
     });
     const result = messageRouter(json + "\n");
     expect(result.textLines).toHaveLength(0);
@@ -52,6 +56,7 @@ describe("messageRouter", () => {
 
   it("A2UI deleteSurface 消息被识别并分流到 a2uiMessages", () => {
     const json = JSON.stringify({
+      version: "v0.9",
       deleteSurface: { surfaceId: "main" },
     });
     const result = messageRouter(json + "\n");
@@ -61,9 +66,9 @@ describe("messageRouter", () => {
 
   it("多行纯 A2UI JSONL 全部归入 a2uiMessages", () => {
     const lines = [
-      JSON.stringify({ beginRendering: { surfaceId: "s1" } }),
-      JSON.stringify({ surfaceUpdate: { surfaceId: "s1", components: [] } }),
-      JSON.stringify({ dataModelUpdate: { surfaceId: "s1", path: "/x" } }),
+      JSON.stringify({ version: "v0.9", createSurface: { surfaceId: "s1", catalogId: "default" } }),
+      JSON.stringify({ version: "v0.9", updateComponents: { surfaceId: "s1", components: [] } }),
+      JSON.stringify({ version: "v0.9", updateDataModel: { surfaceId: "s1", path: "/x" } }),
     ].join("\n") + "\n";
     const result = messageRouter(lines);
     expect(result.textLines).toHaveLength(0);
@@ -75,9 +80,9 @@ describe("messageRouter", () => {
   it("文本和 A2UI 交替出现时各自正确分流", () => {
     const input = [
       "这是一段文本",
-      JSON.stringify({ beginRendering: { surfaceId: "main" } }),
+      JSON.stringify({ version: "v0.9", createSurface: { surfaceId: "main", catalogId: "default" } }),
       "中间还有文本",
-      JSON.stringify({ surfaceUpdate: { surfaceId: "main", components: [] } }),
+      JSON.stringify({ version: "v0.9", updateComponents: { surfaceId: "main", components: [] } }),
       "最后一行文本",
     ].join("\n") + "\n";
     const result = messageRouter(input);
@@ -101,7 +106,7 @@ describe("messageRouter", () => {
 
   it("缓冲区内容与下一个 chunk 拼接后正确解析", () => {
     // 模拟一个 JSON 被跨 chunk 分割
-    const json = JSON.stringify({ beginRendering: { surfaceId: "main" } });
+    const json = JSON.stringify({ version: "v0.9", createSurface: { surfaceId: "main", catalogId: "default" } });
     const half = Math.floor(json.length / 2);
     const part1 = json.slice(0, half);
     const part2 = json.slice(half) + "\n";
@@ -113,13 +118,14 @@ describe("messageRouter", () => {
     expect(result2.textLines).toHaveLength(0);
     expect(result2.a2uiMessages).toHaveLength(1);
     expect(result2.a2uiMessages[0]).toEqual({
-      beginRendering: { surfaceId: "main" },
+      version: "v0.9",
+      createSurface: { surfaceId: "main", catalogId: "default" },
     });
     expect(result2.remainingBuffer).toBe("");
   });
 
   it("多 chunk 连续缓冲拼接正确", () => {
-    const json = JSON.stringify({ surfaceUpdate: { surfaceId: "s1" } });
+    const json = JSON.stringify({ version: "v0.9", updateComponents: { surfaceId: "s1", components: [] } });
     // 分成 3 段
     const len = json.length;
     const p1 = json.slice(0, Math.floor(len / 3));
@@ -208,13 +214,13 @@ describe("messageRouter", () => {
       const result = messageRouter(input);
       expect(result.textLines).toEqual(["这是一些文本回复", "更多文本"]);
       expect(result.a2uiMessages).toHaveLength(2);
-      expect(result.a2uiMessages[0]).toHaveProperty("beginRendering");
-      expect(result.a2uiMessages[1]).toHaveProperty("surfaceUpdate");
+      expect(result.a2uiMessages[0]).toHaveProperty("createSurface");
+      expect(result.a2uiMessages[1]).toHaveProperty("updateComponents");
     });
 
     it("代码块标记不出现在 textLines 中", () => {
       const input = "```a2ui\n" +
-        JSON.stringify({ version: "v0.9", createSurface: { surfaceId: "s1" } }) + "\n" +
+        JSON.stringify({ version: "v0.9", createSurface: { surfaceId: "s1", catalogId: "default" } }) + "\n" +
         "```\n";
 
       const result = messageRouter(input);
@@ -226,7 +232,7 @@ describe("messageRouter", () => {
       const input = [
         "前置文本",
         "```a2ui",
-        JSON.stringify({ version: "v0.9", createSurface: { surfaceId: "s1" } }),
+        JSON.stringify({ version: "v0.9", createSurface: { surfaceId: "s1", catalogId: "default" } }),
         "```",
         "后置文本",
       ].join("\n") + "\n";
@@ -240,11 +246,11 @@ describe("messageRouter", () => {
       const input = [
         "文本1",
         "```a2ui",
-        JSON.stringify({ version: "v0.9", createSurface: { surfaceId: "s1" } }),
+        JSON.stringify({ version: "v0.9", createSurface: { surfaceId: "s1", catalogId: "default" } }),
         "```",
         "文本2",
         "```a2ui",
-        JSON.stringify({ version: "v0.9", createSurface: { surfaceId: "s2" } }),
+        JSON.stringify({ version: "v0.9", createSurface: { surfaceId: "s2", catalogId: "default" } }),
         "```",
         "文本3",
       ].join("\n") + "\n";
@@ -265,7 +271,7 @@ describe("messageRouter", () => {
 
       // chunk2: 块内 JSONL + 结束标记
       const chunk2 = [
-        JSON.stringify({ version: "v0.9", createSurface: { surfaceId: "main" } }),
+        JSON.stringify({ version: "v0.9", createSurface: { surfaceId: "main", catalogId: "default" } }),
         "```",
         "后置文本",
       ].join("\n") + "\n";
@@ -273,13 +279,13 @@ describe("messageRouter", () => {
       const r2 = messageRouter(chunk2, r1.remainingBuffer);
       expect(r2.textLines).toEqual(["后置文本"]);
       expect(r2.a2uiMessages).toHaveLength(1);
-      expect(r2.a2uiMessages[0]).toHaveProperty("beginRendering");
+      expect(r2.a2uiMessages[0]).toHaveProperty("createSurface");
     });
 
     it("跨 chunk 的代码块内容在一个 chunk，结束标记在另一个 chunk", () => {
       // chunk1: ```a2ui + JSONL 行（不完整，无结束标记）
       const chunk1 = "```a2ui\n" +
-        JSON.stringify({ version: "v0.9", createSurface: { surfaceId: "main" } }) + "\n";
+        JSON.stringify({ version: "v0.9", createSurface: { surfaceId: "main", catalogId: "default" } }) + "\n";
 
       const r1 = messageRouter(chunk1);
       expect(r1.a2uiMessages).toHaveLength(1);
@@ -306,7 +312,7 @@ describe("messageRouter", () => {
 
       // chunk2: \n + JSONL + ``` + 文本
       const chunk2 = "\n" +
-        JSON.stringify({ version: "v0.9", createSurface: { surfaceId: "main" } }) + "\n" +
+        JSON.stringify({ version: "v0.9", createSurface: { surfaceId: "main", catalogId: "default" } }) + "\n" +
         "```\n" +
         "后置文本\n";
 
@@ -319,7 +325,7 @@ describe("messageRouter", () => {
       const input = [
         "```a2ui",
         "这不是合法的 JSON",
-        JSON.stringify({ version: "v0.9", createSurface: { surfaceId: "s1" } }),
+        JSON.stringify({ version: "v0.9", createSurface: { surfaceId: "s1", catalogId: "default" } }),
         "```",
       ].join("\n") + "\n";
 
@@ -332,7 +338,7 @@ describe("messageRouter", () => {
       const input = [
         "```a2ui",
         JSON.stringify({ foo: "bar" }),
-        JSON.stringify({ version: "v0.9", createSurface: { surfaceId: "s1" } }),
+        JSON.stringify({ version: "v0.9", createSurface: { surfaceId: "s1", catalogId: "default" } }),
         "```",
       ].join("\n") + "\n";
 
@@ -341,11 +347,11 @@ describe("messageRouter", () => {
       expect(result.a2uiMessages).toHaveLength(1);
     });
 
-    it("代码块内 v0.9 消息被正确转换为 v0.8 格式", () => {
+    it("代码块内 v0.9 消息保持 v0.9 格式输出", () => {
       const input = [
         "```a2ui",
         JSON.stringify({ version: "v0.9", createSurface: { surfaceId: "main", catalogId: "default" } }),
-        JSON.stringify({ version: "v0.9", updateComponents: { surfaceId: "main", components: [{ id: "btn", type: "Button" }] } }),
+        JSON.stringify({ version: "v0.9", updateComponents: { surfaceId: "main", components: [{ id: "btn", component: "Button" }] } }),
         JSON.stringify({ version: "v0.9", updateDataModel: { surfaceId: "main", path: "/msg", value: "hello" } }),
         "```",
       ].join("\n") + "\n";
@@ -353,13 +359,16 @@ describe("messageRouter", () => {
       const result = messageRouter(input);
       expect(result.a2uiMessages).toHaveLength(3);
       expect(result.a2uiMessages[0]).toEqual({
-        beginRendering: { surfaceId: "main", catalogId: "default", root: "root", styles: {} },
+        version: "v0.9",
+        createSurface: { surfaceId: "main", catalogId: "default" },
       });
       expect(result.a2uiMessages[1]).toEqual({
-        surfaceUpdate: { surfaceId: "main", components: [{ id: "btn", type: "Button" }] },
+        version: "v0.9",
+        updateComponents: { surfaceId: "main", components: [{ id: "btn", component: "Button" }] },
       });
       expect(result.a2uiMessages[2]).toEqual({
-        dataModelUpdate: { surfaceId: "main", path: "/msg", value: "hello" },
+        version: "v0.9",
+        updateDataModel: { surfaceId: "main", path: "/msg", value: "hello" },
       });
     });
 
@@ -367,11 +376,11 @@ describe("messageRouter", () => {
       const input = [
         "文本开头",
         // 裸 JSONL（向后兼容）
-        JSON.stringify({ beginRendering: { surfaceId: "s1" } }),
+        JSON.stringify({ version: "v0.9", createSurface: { surfaceId: "s1", catalogId: "default" } }),
         "中间文本",
         // a2ui 代码块
         "```a2ui",
-        JSON.stringify({ version: "v0.9", createSurface: { surfaceId: "s2" } }),
+        JSON.stringify({ version: "v0.9", createSurface: { surfaceId: "s2", catalogId: "default" } }),
         "```",
         "文本结尾",
       ].join("\n") + "\n";
@@ -384,7 +393,7 @@ describe("messageRouter", () => {
     it("未闭合的 a2ui 代码块（流结束时仍在块内）", () => {
       // 模拟流在 a2ui 块内结束
       const chunk = "```a2ui\n" +
-        JSON.stringify({ version: "v0.9", createSurface: { surfaceId: "main" } }) + "\n";
+        JSON.stringify({ version: "v0.9", createSurface: { surfaceId: "main", catalogId: "default" } }) + "\n";
 
       const result = messageRouter(chunk);
       expect(result.a2uiMessages).toHaveLength(1);
@@ -396,7 +405,7 @@ describe("messageRouter", () => {
       const input = [
         "```a2ui",
         "",
-        JSON.stringify({ version: "v0.9", createSurface: { surfaceId: "s1" } }),
+        JSON.stringify({ version: "v0.9", createSurface: { surfaceId: "s1", catalogId: "default" } }),
         "",
         "```",
       ].join("\n") + "\n";
@@ -404,21 +413,6 @@ describe("messageRouter", () => {
       const result = messageRouter(input);
       expect(result.a2uiMessages).toHaveLength(1);
       expect(result.textLines).toHaveLength(0);
-    });
-
-    it("a2ui 块内 v0.8 格式消息也能被识别", () => {
-      const input = [
-        "```a2ui",
-        JSON.stringify({ beginRendering: { surfaceId: "main" } }),
-        JSON.stringify({ surfaceUpdate: { surfaceId: "main", components: [] } }),
-        "```",
-      ].join("\n") + "\n";
-
-      const result = messageRouter(input);
-      expect(result.a2uiMessages).toHaveLength(2);
-      expect(result.a2uiMessages[0]).toEqual({
-        beginRendering: { surfaceId: "main" },
-      });
     });
   });
 });

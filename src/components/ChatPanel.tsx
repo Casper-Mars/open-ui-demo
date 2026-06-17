@@ -1,5 +1,5 @@
 import { useCallback, useRef } from "react";
-import { useA2UI } from "@a2ui/react";
+import type { MessageProcessor } from "@a2ui/web_core/v0_9";
 import { useAppContext, type Message } from "../context/AppContext";
 import { streamChat } from "../lib/streamChat";
 import { messageRouter } from "../lib/messageRouter";
@@ -7,17 +7,20 @@ import MessageList from "./MessageList";
 import ChatInput from "./ChatInput";
 
 /**
- * ChatPanelInner - 聊天面板核心逻辑
+ * ChatPanel - 聊天面板核心逻辑
  *
- * 在 A2UIProvider 内部，可以安全使用 useA2UI hook。
  * 组合 MessageList + ChatInput，管理消息发送和流式接收逻辑。
+ * 通过 props 接收 MessageProcessor，用于处理 A2UI 消息。
  * 在流式接收循环中调用 messageRouter 将 chunk 分流：
  * - 文本行 → dispatch APPEND_STREAM（追加到左侧对话气泡）
- * - A2UI 消息 → processMessages（送入右侧渲染）
+ * - A2UI 消息 → processor.processMessages（送入右侧渲染）
  */
-function ChatPanelInner() {
+export default function ChatPanel({
+  processor,
+}: {
+  processor: MessageProcessor;
+}) {
   const { state, dispatch } = useAppContext();
-  const { processMessages } = useA2UI();
 
   // 跨 chunk 的行缓冲区，用 ref 避免闭包陈旧问题
   const lineBufferRef = useRef<string>("");
@@ -55,9 +58,9 @@ function ChatPanelInner() {
             });
           }
 
-          // A2UI 消息送入右侧渲染
+          // A2UI 消息送入 processor 处理
           if (a2uiMessages.length > 0) {
-            processMessages(a2uiMessages);
+            processor.processMessages(a2uiMessages);
           }
         }
 
@@ -76,7 +79,7 @@ function ChatPanelInner() {
         dispatch({ type: "FINISH_STREAM" });
       }
     },
-    [state.conversationId, dispatch, processMessages],
+    [state.conversationId, dispatch, processor],
   );
 
   return (
@@ -98,5 +101,3 @@ function ChatPanelInner() {
     </div>
   );
 }
-
-export default ChatPanelInner;
