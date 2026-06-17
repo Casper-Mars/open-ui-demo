@@ -1,4 +1,5 @@
 import type { A2uiMessage } from "@a2ui/web_core/v0_9";
+import { basicCatalog } from "@a2ui/react/v0_9";
 
 /**
  * A2UI 消息类型判断的字段名集合。
@@ -42,6 +43,31 @@ function isA2UIMessage(obj: Record<string, unknown>): boolean {
 }
 
 /**
+ * 归一化 A2UI 消息中的 catalogId。
+ * agent（storyboard）返回的 createSurface 消息中 catalogId 可能使用
+ * "https://a2ui.dev/catalogs/basic_catalog"，但 basicCatalog.id 是
+ * "https://a2ui.org/specification/v0_9/basic_catalog.json"。
+ * 如果不替换会导致 MessageProcessor 抛出 Catalog not found 错误。
+ */
+function normalizeA2UIMessage(msg: A2uiMessage): A2uiMessage {
+  if (
+    msg.createSurface &&
+    typeof msg.createSurface === "object" &&
+    "catalogId" in msg.createSurface &&
+    msg.createSurface.catalogId !== basicCatalog.id
+  ) {
+    return {
+      ...msg,
+      createSurface: {
+        ...msg.createSurface,
+        catalogId: basicCatalog.id,
+      },
+    };
+  }
+  return msg;
+}
+
+/**
  * 尝试将一行文本解析为 A2UI 消息（v0.9 格式）。
  * 返回解析后的消息，如果该行不是 A2UI 消息则返回 null。
  */
@@ -54,7 +80,7 @@ function tryParseA2UILine(line: string): A2uiMessage | null {
       !Array.isArray(parsed)
     ) {
       if (isA2UIMessage(parsed as Record<string, unknown>)) {
-        return parsed as A2uiMessage;
+        return normalizeA2UIMessage(parsed as A2uiMessage);
       }
     }
   } catch {

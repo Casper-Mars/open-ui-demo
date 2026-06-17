@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { messageRouter } from "./messageRouter";
+import { basicCatalog } from "@a2ui/react/v0_9";
 
 describe("messageRouter", () => {
   // ── 验收标准 1：纯文本流式返回 → 全部展示在左侧对话区 ──
@@ -23,14 +24,14 @@ describe("messageRouter", () => {
   it("A2UI createSurface 消息被识别并分流到 a2uiMessages", () => {
     const json = JSON.stringify({
       version: "v0.9",
-      createSurface: { surfaceId: "main", catalogId: "default" },
+      createSurface: { surfaceId: "main", catalogId: basicCatalog.id },
     });
     const result = messageRouter(json + "\n");
     expect(result.textLines).toHaveLength(0);
     expect(result.a2uiMessages).toHaveLength(1);
     expect(result.a2uiMessages[0]).toEqual({
       version: "v0.9",
-      createSurface: { surfaceId: "main", catalogId: "default" },
+      createSurface: { surfaceId: "main", catalogId: basicCatalog.id },
     });
   });
 
@@ -66,7 +67,7 @@ describe("messageRouter", () => {
 
   it("多行纯 A2UI JSONL 全部归入 a2uiMessages", () => {
     const lines = [
-      JSON.stringify({ version: "v0.9", createSurface: { surfaceId: "s1", catalogId: "default" } }),
+      JSON.stringify({ version: "v0.9", createSurface: { surfaceId: "s1", catalogId: basicCatalog.id } }),
       JSON.stringify({ version: "v0.9", updateComponents: { surfaceId: "s1", components: [] } }),
       JSON.stringify({ version: "v0.9", updateDataModel: { surfaceId: "s1", path: "/x" } }),
     ].join("\n") + "\n";
@@ -80,7 +81,7 @@ describe("messageRouter", () => {
   it("文本和 A2UI 交替出现时各自正确分流", () => {
     const input = [
       "这是一段文本",
-      JSON.stringify({ version: "v0.9", createSurface: { surfaceId: "main", catalogId: "default" } }),
+      JSON.stringify({ version: "v0.9", createSurface: { surfaceId: "main", catalogId: basicCatalog.id } }),
       "中间还有文本",
       JSON.stringify({ version: "v0.9", updateComponents: { surfaceId: "main", components: [] } }),
       "最后一行文本",
@@ -106,7 +107,7 @@ describe("messageRouter", () => {
 
   it("缓冲区内容与下一个 chunk 拼接后正确解析", () => {
     // 模拟一个 JSON 被跨 chunk 分割
-    const json = JSON.stringify({ version: "v0.9", createSurface: { surfaceId: "main", catalogId: "default" } });
+    const json = JSON.stringify({ version: "v0.9", createSurface: { surfaceId: "main", catalogId: basicCatalog.id } });
     const half = Math.floor(json.length / 2);
     const part1 = json.slice(0, half);
     const part2 = json.slice(half) + "\n";
@@ -119,7 +120,7 @@ describe("messageRouter", () => {
     expect(result2.a2uiMessages).toHaveLength(1);
     expect(result2.a2uiMessages[0]).toEqual({
       version: "v0.9",
-      createSurface: { surfaceId: "main", catalogId: "default" },
+      createSurface: { surfaceId: "main", catalogId: basicCatalog.id },
     });
     expect(result2.remainingBuffer).toBe("");
   });
@@ -205,7 +206,7 @@ describe("messageRouter", () => {
       const input = [
         "这是一些文本回复",
         "```a2ui",
-        JSON.stringify({ version: "v0.9", createSurface: { surfaceId: "main", catalogId: "default" } }),
+        JSON.stringify({ version: "v0.9", createSurface: { surfaceId: "main", catalogId: basicCatalog.id } }),
         JSON.stringify({ version: "v0.9", updateComponents: { surfaceId: "main", components: [] } }),
         "```",
         "更多文本",
@@ -220,7 +221,7 @@ describe("messageRouter", () => {
 
     it("代码块标记不出现在 textLines 中", () => {
       const input = "```a2ui\n" +
-        JSON.stringify({ version: "v0.9", createSurface: { surfaceId: "s1", catalogId: "default" } }) + "\n" +
+        JSON.stringify({ version: "v0.9", createSurface: { surfaceId: "s1", catalogId: basicCatalog.id } }) + "\n" +
         "```\n";
 
       const result = messageRouter(input);
@@ -232,7 +233,7 @@ describe("messageRouter", () => {
       const input = [
         "前置文本",
         "```a2ui",
-        JSON.stringify({ version: "v0.9", createSurface: { surfaceId: "s1", catalogId: "default" } }),
+        JSON.stringify({ version: "v0.9", createSurface: { surfaceId: "s1", catalogId: basicCatalog.id } }),
         "```",
         "后置文本",
       ].join("\n") + "\n";
@@ -246,11 +247,11 @@ describe("messageRouter", () => {
       const input = [
         "文本1",
         "```a2ui",
-        JSON.stringify({ version: "v0.9", createSurface: { surfaceId: "s1", catalogId: "default" } }),
+        JSON.stringify({ version: "v0.9", createSurface: { surfaceId: "s1", catalogId: basicCatalog.id } }),
         "```",
         "文本2",
         "```a2ui",
-        JSON.stringify({ version: "v0.9", createSurface: { surfaceId: "s2", catalogId: "default" } }),
+        JSON.stringify({ version: "v0.9", createSurface: { surfaceId: "s2", catalogId: basicCatalog.id } }),
         "```",
         "文本3",
       ].join("\n") + "\n";
@@ -271,7 +272,7 @@ describe("messageRouter", () => {
 
       // chunk2: 块内 JSONL + 结束标记
       const chunk2 = [
-        JSON.stringify({ version: "v0.9", createSurface: { surfaceId: "main", catalogId: "default" } }),
+        JSON.stringify({ version: "v0.9", createSurface: { surfaceId: "main", catalogId: basicCatalog.id } }),
         "```",
         "后置文本",
       ].join("\n") + "\n";
@@ -285,7 +286,7 @@ describe("messageRouter", () => {
     it("跨 chunk 的代码块内容在一个 chunk，结束标记在另一个 chunk", () => {
       // chunk1: ```a2ui + JSONL 行（不完整，无结束标记）
       const chunk1 = "```a2ui\n" +
-        JSON.stringify({ version: "v0.9", createSurface: { surfaceId: "main", catalogId: "default" } }) + "\n";
+        JSON.stringify({ version: "v0.9", createSurface: { surfaceId: "main", catalogId: basicCatalog.id } }) + "\n";
 
       const r1 = messageRouter(chunk1);
       expect(r1.a2uiMessages).toHaveLength(1);
@@ -312,7 +313,7 @@ describe("messageRouter", () => {
 
       // chunk2: \n + JSONL + ``` + 文本
       const chunk2 = "\n" +
-        JSON.stringify({ version: "v0.9", createSurface: { surfaceId: "main", catalogId: "default" } }) + "\n" +
+        JSON.stringify({ version: "v0.9", createSurface: { surfaceId: "main", catalogId: basicCatalog.id } }) + "\n" +
         "```\n" +
         "后置文本\n";
 
@@ -325,7 +326,7 @@ describe("messageRouter", () => {
       const input = [
         "```a2ui",
         "这不是合法的 JSON",
-        JSON.stringify({ version: "v0.9", createSurface: { surfaceId: "s1", catalogId: "default" } }),
+        JSON.stringify({ version: "v0.9", createSurface: { surfaceId: "s1", catalogId: basicCatalog.id } }),
         "```",
       ].join("\n") + "\n";
 
@@ -338,7 +339,7 @@ describe("messageRouter", () => {
       const input = [
         "```a2ui",
         JSON.stringify({ foo: "bar" }),
-        JSON.stringify({ version: "v0.9", createSurface: { surfaceId: "s1", catalogId: "default" } }),
+        JSON.stringify({ version: "v0.9", createSurface: { surfaceId: "s1", catalogId: basicCatalog.id } }),
         "```",
       ].join("\n") + "\n";
 
@@ -350,7 +351,7 @@ describe("messageRouter", () => {
     it("代码块内 v0.9 消息保持 v0.9 格式输出", () => {
       const input = [
         "```a2ui",
-        JSON.stringify({ version: "v0.9", createSurface: { surfaceId: "main", catalogId: "default" } }),
+        JSON.stringify({ version: "v0.9", createSurface: { surfaceId: "main", catalogId: basicCatalog.id } }),
         JSON.stringify({ version: "v0.9", updateComponents: { surfaceId: "main", components: [{ id: "btn", component: "Button" }] } }),
         JSON.stringify({ version: "v0.9", updateDataModel: { surfaceId: "main", path: "/msg", value: "hello" } }),
         "```",
@@ -360,7 +361,7 @@ describe("messageRouter", () => {
       expect(result.a2uiMessages).toHaveLength(3);
       expect(result.a2uiMessages[0]).toEqual({
         version: "v0.9",
-        createSurface: { surfaceId: "main", catalogId: "default" },
+        createSurface: { surfaceId: "main", catalogId: basicCatalog.id },
       });
       expect(result.a2uiMessages[1]).toEqual({
         version: "v0.9",
@@ -376,11 +377,11 @@ describe("messageRouter", () => {
       const input = [
         "文本开头",
         // 裸 JSONL（向后兼容）
-        JSON.stringify({ version: "v0.9", createSurface: { surfaceId: "s1", catalogId: "default" } }),
+        JSON.stringify({ version: "v0.9", createSurface: { surfaceId: "s1", catalogId: basicCatalog.id } }),
         "中间文本",
         // a2ui 代码块
         "```a2ui",
-        JSON.stringify({ version: "v0.9", createSurface: { surfaceId: "s2", catalogId: "default" } }),
+        JSON.stringify({ version: "v0.9", createSurface: { surfaceId: "s2", catalogId: basicCatalog.id } }),
         "```",
         "文本结尾",
       ].join("\n") + "\n";
@@ -393,7 +394,7 @@ describe("messageRouter", () => {
     it("未闭合的 a2ui 代码块（流结束时仍在块内）", () => {
       // 模拟流在 a2ui 块内结束
       const chunk = "```a2ui\n" +
-        JSON.stringify({ version: "v0.9", createSurface: { surfaceId: "main", catalogId: "default" } }) + "\n";
+        JSON.stringify({ version: "v0.9", createSurface: { surfaceId: "main", catalogId: basicCatalog.id } }) + "\n";
 
       const result = messageRouter(chunk);
       expect(result.a2uiMessages).toHaveLength(1);
@@ -401,11 +402,70 @@ describe("messageRouter", () => {
       expect(result.remainingBuffer).toContain("__A2UI_BLOCK__");
     });
 
+    // ── catalogId 归一化 ──
+
+    it("catalogId 不匹配时自动替换为 basicCatalog.id", () => {
+      const json = JSON.stringify({
+        version: "v0.9",
+        createSurface: { surfaceId: "main", catalogId: "https://a2ui.dev/catalogs/basic_catalog" },
+      });
+      const result = messageRouter(json + "\n");
+      expect(result.a2uiMessages).toHaveLength(1);
+      expect(result.a2uiMessages[0]).toEqual({
+        version: "v0.9",
+        createSurface: { surfaceId: "main", catalogId: basicCatalog.id },
+      });
+    });
+
+    it("catalogId 已正确时不修改", () => {
+      const json = JSON.stringify({
+        version: "v0.9",
+        createSurface: { surfaceId: "main", catalogId: basicCatalog.id },
+      });
+      const result = messageRouter(json + "\n");
+      expect(result.a2uiMessages).toHaveLength(1);
+      expect(result.a2uiMessages[0]).toEqual({
+        version: "v0.9",
+        createSurface: { surfaceId: "main", catalogId: basicCatalog.id },
+      });
+    });
+
+    it("没有 createSurface 的消息不受 catalogId 归一化影响", () => {
+      const json = JSON.stringify({
+        version: "v0.9",
+        updateComponents: { surfaceId: "main", components: [] },
+      });
+      const result = messageRouter(json + "\n");
+      expect(result.a2uiMessages).toHaveLength(1);
+      expect(result.a2uiMessages[0]).toEqual({
+        version: "v0.9",
+        updateComponents: { surfaceId: "main", components: [] },
+      });
+    });
+
+    it("a2ui 代码块内的 createSurface 也进行 catalogId 归一化", () => {
+      const input = [
+        "```a2ui",
+        JSON.stringify({
+          version: "v0.9",
+          createSurface: { surfaceId: "main", catalogId: "https://a2ui.dev/catalogs/basic_catalog" },
+        }),
+        "```",
+      ].join("\n") + "\n";
+
+      const result = messageRouter(input);
+      expect(result.a2uiMessages).toHaveLength(1);
+      expect(result.a2uiMessages[0]).toEqual({
+        version: "v0.9",
+        createSurface: { surfaceId: "main", catalogId: basicCatalog.id },
+      });
+    });
+
     it("a2ui 块内空行被跳过", () => {
       const input = [
         "```a2ui",
         "",
-        JSON.stringify({ version: "v0.9", createSurface: { surfaceId: "s1", catalogId: "default" } }),
+        JSON.stringify({ version: "v0.9", createSurface: { surfaceId: "s1", catalogId: basicCatalog.id } }),
         "",
         "```",
       ].join("\n") + "\n";
