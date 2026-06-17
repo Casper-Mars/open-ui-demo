@@ -191,4 +191,234 @@ describe("messageRouter", () => {
     expect(result.remainingBuffer).toBe("残留文本");
     // 调用方应在流结束后将 remainingBuffer 作为文本追加
   });
+
+  // ── a2ui 代码块支持 ──
+
+  describe("```a2ui 代码块", () => {
+    it("代码块内的 A2UI JSONL 被正确解析，标记行不出现在 textLines", () => {
+      const input = [
+        "这是一些文本回复",
+        "```a2ui",
+        JSON.stringify({ version: "v0.9", createSurface: { surfaceId: "main", catalogId: "default" } }),
+        JSON.stringify({ version: "v0.9", updateComponents: { surfaceId: "main", components: [] } }),
+        "```",
+        "更多文本",
+      ].join("\n") + "\n";
+
+      const result = messageRouter(input);
+      expect(result.textLines).toEqual(["这是一些文本回复", "更多文本"]);
+      expect(result.a2uiMessages).toHaveLength(2);
+      expect(result.a2uiMessages[0]).toHaveProperty("beginRendering");
+      expect(result.a2uiMessages[1]).toHaveProperty("surfaceUpdate");
+    });
+
+    it("代码块标记不出现在 textLines 中", () => {
+      const input = "```a2ui\n" +
+        JSON.stringify({ version: "v0.9", createSurface: { surfaceId: "s1" } }) + "\n" +
+        "```\n";
+
+      const result = messageRouter(input);
+      expect(result.textLines).toHaveLength(0);
+      expect(result.a2uiMessages).toHaveLength(1);
+    });
+
+    it("代码块外的文本正常分流到 textLines", () => {
+      const input = [
+        "前置文本",
+        "```a2ui",
+        JSON.stringify({ version: "v0.9", createSurface: { surfaceId: "s1" } }),
+        "```",
+        "后置文本",
+      ].join("\n") + "\n";
+
+      const result = messageRouter(input);
+      expect(result.textLines).toEqual(["前置文本", "后置文本"]);
+      expect(result.a2uiMessages).toHaveLength(1);
+    });
+
+    it("多个 a2ui 块都能被正确提取", () => {
+      const input = [
+        "文本1",
+        "```a2ui",
+        JSON.stringify({ version: "v0.9", createSurface: { surfaceId: "s1" } }),
+        "```",
+        "文本2",
+        "```a2ui",
+        JSON.stringify({ version: "v0.9", createSurface: { surfaceId: "s2" } }),
+        "```",
+        "文本3",
+      ].join("\n") + "\n";
+
+      const result = messageRouter(input);
+      expect(result.textLines).toEqual(["文本1", "文本2", "文本3"]);
+      expect(result.a2uiMessages).toHaveLength(2);
+    });
+
+    it("跨 chunk 的代码块开始标记在一个 chunk，内容在另一个 chunk", () => {
+      // chunk1: 文本 + ```a2ui 开始标记
+      const chunk1 = "前置文本\n```a2ui\n";
+      const r1 = messageRouter(chunk1);
+      expect(r1.textLines).toEqual(["前置文本"]);
+      expect(r1.a2uiMessages).toHaveLength(0);
+      // remainingBuffer 应包含 A2UI_BLOCK 标记
+      expect(r1.remainingBuffer).toContain("__A2UI_BLOCK__");
+
+      // chunk2: 块内 JSONL + 结束标记
+      const chunk2 = [
+        JSON.stringify({ version: "v0.9", createSurface: { surfaceId: "main" } }),
+        "```",
+        "后置文本",
+      ].join("\n") + "\n";
+
+      const r2 = messageRouter(chunk2, r1.remainingBuffer);
+      expect(r2.textLines).toEqual(["后置文本"]);
+      expect(r2.a2uiMessages).toHaveLength(1);
+      expect(r2.a2uiMessages[0]).toHaveProperty("beginRendering");
+    });
+
+    it("跨 chunk 的代码块内容在一个 chunk，结束标记在另一个 chunk", () => {
+      // chunk1: ```a2ui + JSONL 行（不完整，无结束标记）
+      const chunk1 = "```a2ui\n" +
+        JSON.stringify({ version: "v0.9", createSurface: { surfaceId: "main" } }) + "\n";
+
+      const r1 = messageRouter(chunk1);
+      expect(r1.a2uiMessages).toHaveLength(1);
+      // 仍在 a2ui 块内
+      expect(r1.remainingBuffer).toContain("__A2UI_BLOCK__");
+
+      // chunk2: 结束标记 + 后续文本
+      const chunk2 = "```\n后续文本\n";
+      const r2 = messageRouter(chunk2, r1.remainingBuffer);
+      expect(r2.textLines).toEqual(["后续文本"]);
+      expect(r2.a2uiMessages).toHaveLength(0);
+      // 状态已回到 NORMAL
+      expect(r2.remainingBuffer).toBe("");
+    });
+
+    it("跨 chunk 的代码块开始标记在一个 chunk 末尾（不完整行），结束标记在另一个 chunk", () => {
+      // chunk1: 文本 + ```a2ui（不以 \n 结尾，留在 buffer 中）
+      const chunk1 = "前置文本\n```a2ui";
+      const r1 = messageRouter(chunk1);
+      expect(r1.textLines).toEqual(["前置文本"]);
+      expect(r1.a2uiMessages).toHaveLength(0);
+      // remainingBuffer 包含不完整的 ```a2ui 行
+      expect(r1.remainingBuffer).toBe("```a2ui");
+
+      // chunk2: \n + JSONL + ``` + 文本
+      const chunk2 = "\n" +
+        JSON.stringify({ version: "v0.9", createSurface: { surfaceId: "main" } }) + "\n" +
+        "```\n" +
+        "后置文本\n";
+
+      const r2 = messageRouter(chunk2, r1.remainingBuffer);
+      expect(r2.textLines).toEqual(["后置文本"]);
+      expect(r2.a2uiMessages).toHaveLength(1);
+    });
+
+    it("代码块内非 JSON 行被静默跳过（不产生文本也不产生 A2UI）", () => {
+      const input = [
+        "```a2ui",
+        "这不是合法的 JSON",
+        JSON.stringify({ version: "v0.9", createSurface: { surfaceId: "s1" } }),
+        "```",
+      ].join("\n") + "\n";
+
+      const result = messageRouter(input);
+      expect(result.textLines).toHaveLength(0);
+      expect(result.a2uiMessages).toHaveLength(1);
+    });
+
+    it("代码块内 JSON 对象但不是 A2UI 消息 → 静默跳过", () => {
+      const input = [
+        "```a2ui",
+        JSON.stringify({ foo: "bar" }),
+        JSON.stringify({ version: "v0.9", createSurface: { surfaceId: "s1" } }),
+        "```",
+      ].join("\n") + "\n";
+
+      const result = messageRouter(input);
+      expect(result.textLines).toHaveLength(0);
+      expect(result.a2uiMessages).toHaveLength(1);
+    });
+
+    it("代码块内 v0.9 消息被正确转换为 v0.8 格式", () => {
+      const input = [
+        "```a2ui",
+        JSON.stringify({ version: "v0.9", createSurface: { surfaceId: "main", catalogId: "default" } }),
+        JSON.stringify({ version: "v0.9", updateComponents: { surfaceId: "main", components: [{ id: "btn", type: "Button" }] } }),
+        JSON.stringify({ version: "v0.9", updateDataModel: { surfaceId: "main", path: "/msg", value: "hello" } }),
+        "```",
+      ].join("\n") + "\n";
+
+      const result = messageRouter(input);
+      expect(result.a2uiMessages).toHaveLength(3);
+      expect(result.a2uiMessages[0]).toEqual({
+        beginRendering: { surfaceId: "main", catalogId: "default", root: "root", styles: {} },
+      });
+      expect(result.a2uiMessages[1]).toEqual({
+        surfaceUpdate: { surfaceId: "main", components: [{ id: "btn", type: "Button" }] },
+      });
+      expect(result.a2uiMessages[2]).toEqual({
+        dataModelUpdate: { surfaceId: "main", path: "/msg", value: "hello" },
+      });
+    });
+
+    it("混合场景：裸 JSONL + a2ui 代码块 + 纯文本", () => {
+      const input = [
+        "文本开头",
+        // 裸 JSONL（向后兼容）
+        JSON.stringify({ beginRendering: { surfaceId: "s1" } }),
+        "中间文本",
+        // a2ui 代码块
+        "```a2ui",
+        JSON.stringify({ version: "v0.9", createSurface: { surfaceId: "s2" } }),
+        "```",
+        "文本结尾",
+      ].join("\n") + "\n";
+
+      const result = messageRouter(input);
+      expect(result.textLines).toEqual(["文本开头", "中间文本", "文本结尾"]);
+      expect(result.a2uiMessages).toHaveLength(2);
+    });
+
+    it("未闭合的 a2ui 代码块（流结束时仍在块内）", () => {
+      // 模拟流在 a2ui 块内结束
+      const chunk = "```a2ui\n" +
+        JSON.stringify({ version: "v0.9", createSurface: { surfaceId: "main" } }) + "\n";
+
+      const result = messageRouter(chunk);
+      expect(result.a2uiMessages).toHaveLength(1);
+      // 仍在块内，remainingBuffer 包含标记
+      expect(result.remainingBuffer).toContain("__A2UI_BLOCK__");
+    });
+
+    it("a2ui 块内空行被跳过", () => {
+      const input = [
+        "```a2ui",
+        "",
+        JSON.stringify({ version: "v0.9", createSurface: { surfaceId: "s1" } }),
+        "",
+        "```",
+      ].join("\n") + "\n";
+
+      const result = messageRouter(input);
+      expect(result.a2uiMessages).toHaveLength(1);
+      expect(result.textLines).toHaveLength(0);
+    });
+
+    it("a2ui 块内 v0.8 格式消息也能被识别", () => {
+      const input = [
+        "```a2ui",
+        JSON.stringify({ beginRendering: { surfaceId: "main" } }),
+        JSON.stringify({ surfaceUpdate: { surfaceId: "main", components: [] } }),
+        "```",
+      ].join("\n") + "\n";
+
+      const result = messageRouter(input);
+      expect(result.a2uiMessages).toHaveLength(2);
+      expect(result.a2uiMessages[0]).toEqual({
+        beginRendering: { surfaceId: "main" },
+      });
+    });
+  });
 });
