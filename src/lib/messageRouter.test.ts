@@ -482,10 +482,12 @@ describe("messageRouter", () => {
       expect(result.a2uiMessages[1]).toHaveProperty("updateComponents");
       const uc = result.a2uiMessages[1].updateComponents!;
       expect(uc.surfaceId).toBe("test_surface");
-      expect(uc.components).toHaveLength(3);
+      // Button text→child 转换后：Column + Text(title) + Text(button_text) + Button = 4 个组件
+      expect(uc.components).toHaveLength(4);
       expect(uc.components![0]).toEqual({ component: "Column", id: "root", children: ["title", "button"] });
       expect(uc.components![1]).toEqual({ component: "Text", id: "title", text: "联调测试", variant: "heading" });
-      expect(uc.components![2]).toEqual({ component: "Button", id: "button", text: "点击我", variant: "primary" });
+      expect(uc.components![2]).toEqual({ component: "Text", id: "button_text", text: "点击我" });
+      expect(uc.components![3]).toEqual({ component: "Button", id: "button", child: "button_text", variant: "primary" });
     });
 
     it("跨多行的 JSON 消息（只有 2 行）被正确解析", () => {
@@ -583,6 +585,360 @@ describe("messageRouter", () => {
       const result = messageRouter(input);
       expect(result.a2uiMessages).toHaveLength(1);
       expect(result.textLines).toHaveLength(0);
+    });
+  });
+
+  // ── Button 组件兼容：text → child + Text 子组件 ──
+
+  describe("Button 组件兼容", () => {
+    it("Button 的 text 属性自动转换为 child + Text 子组件", () => {
+      const json = JSON.stringify({
+        version: "v0.9",
+        updateComponents: {
+          surfaceId: "main",
+          components: [
+            { component: "Button", id: "click-btn", text: "点我", variant: "primary" },
+          ],
+        },
+      });
+      const result = messageRouter(json + "\n");
+      expect(result.a2uiMessages).toHaveLength(1);
+      const components = result.a2uiMessages[0].updateComponents!.components!;
+      expect(components).toHaveLength(2);
+
+      // Text 子组件在前（先 push）
+      expect(components[0]).toEqual({
+        component: "Text",
+        id: "click-btn_text",
+        text: "点我",
+      });
+      // Button 组件在后，text 已替换为 child
+      expect(components[1]).toEqual({
+        component: "Button",
+        id: "click-btn",
+        child: "click-btn_text",
+        variant: "primary",
+      });
+    });
+
+    it("已有 child 的 Button 不受 text→child 转换影响", () => {
+      const json = JSON.stringify({
+        version: "v0.9",
+        updateComponents: {
+          surfaceId: "main",
+          components: [
+            { component: "Button", id: "btn", child: "existing-text", text: "忽略我" },
+          ],
+        },
+      });
+      const result = messageRouter(json + "\n");
+      expect(result.a2uiMessages).toHaveLength(1);
+      const components = result.a2uiMessages[0].updateComponents!.components!;
+      // 已有 child，不生成 Text 子组件，也不修改
+      expect(components).toHaveLength(1);
+      expect(components[0]).toEqual({
+        component: "Button",
+        id: "btn",
+        child: "existing-text",
+        text: "忽略我",
+      });
+    });
+
+    it("非 Button 组件不受影响", () => {
+      const json = JSON.stringify({
+        version: "v0.9",
+        updateComponents: {
+          surfaceId: "main",
+          components: [
+            { component: "Text", id: "t1", text: "hello" },
+            { component: "Column", id: "col", children: ["t1"] },
+          ],
+        },
+      });
+      const result = messageRouter(json + "\n");
+      expect(result.a2uiMessages).toHaveLength(1);
+      const components = result.a2uiMessages[0].updateComponents!.components!;
+      expect(components).toHaveLength(2);
+      expect(components[0]).toEqual({ component: "Text", id: "t1", text: "hello" });
+      expect(components[1]).toEqual({ component: "Column", id: "col", children: ["t1"] });
+    });
+
+    it("Button 的 action 被包装为 { event: action } 格式", () => {
+      const json = JSON.stringify({
+        version: "v0.9",
+        updateComponents: {
+          surfaceId: "main",
+          components: [
+            {
+              component: "Button",
+              id: "btn",
+              child: "btn_text",
+              action: { name: "submit", context: { key: "value" } },
+            },
+          ],
+        },
+      });
+      const result = messageRouter(json + "\n");
+      expect(result.a2uiMessages).toHaveLength(1);
+      const components = result.a2uiMessages[0].updateComponents!.components!;
+      expect(components).toHaveLength(1);
+      expect(components[0]).toEqual({
+        component: "Button",
+        id: "btn",
+        child: "btn_text",
+        action: { event: { name: "submit", context: { key: "value" } } },
+      });
+    });
+
+    it("已有 { event: ... } 格式的 action 不被重复包装", () => {
+      const json = JSON.stringify({
+        version: "v0.9",
+        updateComponents: {
+          surfaceId: "main",
+          components: [
+            {
+              component: "Button",
+              id: "btn",
+              child: "btn_text",
+              action: { event: { name: "click", context: {} } },
+            },
+          ],
+        },
+      });
+      const result = messageRouter(json + "\n");
+      expect(result.a2uiMessages).toHaveLength(1);
+      const components = result.a2uiMessages[0].updateComponents!.components!;
+      expect(components).toHaveLength(1);
+      expect(components[0]).toEqual({
+        component: "Button",
+        id: "btn",
+        child: "btn_text",
+        action: { event: { name: "click", context: {} } },
+      });
+    });
+
+    it("Button 同时有 text 和裸 action → 同时转换", () => {
+      const json = JSON.stringify({
+        version: "v0.9",
+        updateComponents: {
+          surfaceId: "main",
+          components: [
+            {
+              component: "Button",
+              id: "click-btn",
+              text: "点我",
+              variant: "primary",
+              action: { name: "submit", context: {} },
+            },
+          ],
+        },
+      });
+      const result = messageRouter(json + "\n");
+      expect(result.a2uiMessages).toHaveLength(1);
+      const components = result.a2uiMessages[0].updateComponents!.components!;
+      expect(components).toHaveLength(2);
+
+      // Text 子组件
+      expect(components[0]).toEqual({
+        component: "Text",
+        id: "click-btn_text",
+        text: "点我",
+      });
+      // Button：text→child + action 包装
+      expect(components[1]).toEqual({
+        component: "Button",
+        id: "click-btn",
+        child: "click-btn_text",
+        variant: "primary",
+        action: { event: { name: "submit", context: {} } },
+      });
+    });
+
+    it("没有 updateComponents 的消息不受影响", () => {
+      const json = JSON.stringify({
+        version: "v0.9",
+        createSurface: { surfaceId: "main", catalogId: basicCatalog.id },
+      });
+      const result = messageRouter(json + "\n");
+      expect(result.a2uiMessages).toHaveLength(1);
+      expect(result.a2uiMessages[0]).toEqual({
+        version: "v0.9",
+        createSurface: { surfaceId: "main", catalogId: basicCatalog.id },
+      });
+    });
+
+    // ── Button action 格式兼容（A2UI v0.9 标准）──
+
+    it("action 含 type 字段 → 提取 type 作为 event name，整个 action 作为 context", () => {
+      const json = JSON.stringify({
+        version: "v0.9",
+        updateComponents: {
+          surfaceId: "main",
+          components: [
+            {
+              component: "Button",
+              id: "action-btn",
+              child: "action-btn_text",
+              action: { type: "console", message: "test" },
+            },
+          ],
+        },
+      });
+      const result = messageRouter(json + "\n");
+      expect(result.a2uiMessages).toHaveLength(1);
+      const components = result.a2uiMessages[0].updateComponents!.components!;
+      expect(components).toHaveLength(1);
+      expect(components[0]).toEqual({
+        component: "Button",
+        id: "action-btn",
+        child: "action-btn_text",
+        action: {
+          event: {
+            name: "console",
+            context: { type: "console", message: "test" },
+          },
+        },
+      });
+    });
+
+    it("action 含 name+context → 提取 name 作为 event name，复用 context", () => {
+      const json = JSON.stringify({
+        version: "v0.9",
+        updateComponents: {
+          surfaceId: "main",
+          components: [
+            {
+              component: "Button",
+              id: "btn",
+              child: "btn_text",
+              action: { name: "click", context: { key: "val" } },
+            },
+          ],
+        },
+      });
+      const result = messageRouter(json + "\n");
+      expect(result.a2uiMessages).toHaveLength(1);
+      const components = result.a2uiMessages[0].updateComponents!.components!;
+      expect(components).toHaveLength(1);
+      expect(components[0]).toEqual({
+        component: "Button",
+        id: "btn",
+        child: "btn_text",
+        action: {
+          event: {
+            name: "click",
+            context: { key: "val" },
+          },
+        },
+      });
+    });
+
+    it("action 无 name/type → 默认 event name 为 'action'", () => {
+      const json = JSON.stringify({
+        version: "v0.9",
+        updateComponents: {
+          surfaceId: "main",
+          components: [
+            {
+              component: "Button",
+              id: "btn",
+              child: "btn_text",
+              action: { message: "hello", data: 123 },
+            },
+          ],
+        },
+      });
+      const result = messageRouter(json + "\n");
+      expect(result.a2uiMessages).toHaveLength(1);
+      const components = result.a2uiMessages[0].updateComponents!.components!;
+      expect(components).toHaveLength(1);
+      expect(components[0]).toEqual({
+        component: "Button",
+        id: "btn",
+        child: "btn_text",
+        action: {
+          event: {
+            name: "action",
+            context: { message: "hello", data: 123 },
+          },
+        },
+      });
+    });
+
+    it("action 含 type 和 name → type 优先作为 event name", () => {
+      const json = JSON.stringify({
+        version: "v0.9",
+        updateComponents: {
+          surfaceId: "main",
+          components: [
+            {
+              component: "Button",
+              id: "btn",
+              child: "btn_text",
+              action: { type: "navigate", name: "click", url: "/home" },
+            },
+          ],
+        },
+      });
+      const result = messageRouter(json + "\n");
+      expect(result.a2uiMessages).toHaveLength(1);
+      const components = result.a2uiMessages[0].updateComponents!.components!;
+      expect(components).toHaveLength(1);
+      expect(components[0]).toEqual({
+        component: "Button",
+        id: "btn",
+        child: "btn_text",
+        action: {
+          event: {
+            name: "navigate",
+            context: { type: "navigate", name: "click", url: "/home" },
+          },
+        },
+      });
+    });
+
+    it("没有 action 的 Button 不受影响", () => {
+      const json = JSON.stringify({
+        version: "v0.9",
+        updateComponents: {
+          surfaceId: "main",
+          components: [
+            { component: "Button", id: "btn", child: "btn_text" },
+          ],
+        },
+      });
+      const result = messageRouter(json + "\n");
+      expect(result.a2uiMessages).toHaveLength(1);
+      const components = result.a2uiMessages[0].updateComponents!.components!;
+      expect(components).toHaveLength(1);
+      expect(components[0]).toEqual({
+        component: "Button",
+        id: "btn",
+        child: "btn_text",
+      });
+    });
+
+    it("a2ui 代码块内的 Button text→child 转换也生效", () => {
+      const input = [
+        "```a2ui",
+        JSON.stringify({
+          version: "v0.9",
+          updateComponents: {
+            surfaceId: "main",
+            components: [
+              { component: "Button", id: "btn", text: "点击" },
+            ],
+          },
+        }),
+        "```",
+      ].join("\n") + "\n";
+
+      const result = messageRouter(input);
+      expect(result.a2uiMessages).toHaveLength(1);
+      const components = result.a2uiMessages[0].updateComponents!.components!;
+      expect(components).toHaveLength(2);
+      expect(components[0]).toEqual({ component: "Text", id: "btn_text", text: "点击" });
+      expect(components[1]).toEqual({ component: "Button", id: "btn", child: "btn_text" });
     });
   });
 });

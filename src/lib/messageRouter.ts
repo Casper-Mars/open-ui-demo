@@ -50,28 +50,129 @@ function isA2UIMessage(obj: Record<string, unknown>): boolean {
 }
 
 /**
- * 归一化 A2UI 消息中的 catalogId。
- * agent（storyboard）返回的 createSurface 消息中 catalogId 可能使用
+ * 兼容 agent（storyboard）返回的 Button 组件。
+ *
+ * 1. Button 的 text → child + Text 子组件转换：
+ *    agent 可能返回 {"component":"Button","text":"点我"}，
+ *    但 A2UI v0.9 的 Button schema 要求用 "child"（子组件 ID）。
+ *    自动生成 Text 子组件并设置 child 引用。
+ *
+ * 2. Button 的 action 包装：
+ *    agent 可能返回 {"action":{"name":"click","context":{}}}，
+ *    但 A2UI v0.9 要求 action 为 { event: { name, context } } 格式。
+ *    自动将裸 action 包装为 { event: action }。
+ */
+function normalizeComponents(
+  components: Record<string, unknown>[],
+): Record<string, unknown>[] {
+  const result: Record<string, unknown>[] = [];
+
+  for (const comp of components) {
+    if (comp.component === "Button") {
+      const normalized = { ...comp };
+      let modified = false;
+
+      // 1. text → child + Text 子组件
+      if (
+        typeof normalized.text === "string" &&
+        normalized.text.length > 0 &&
+        normalized.child === undefined
+      ) {
+        const buttonId = String(normalized.id ?? "button");
+        const textChildId = buttonId + "_text";
+        normalized.child = textChildId;
+        delete normalized.text;
+        modified = true;
+
+        // 生成 Text 子组件
+        result.push({
+          component: "Text",
+          id: textChildId,
+          text: comp.text,
+        });
+      }
+
+      // 2. action 包装：如果 action 存在但不是 { event: ... } 格式
+      if (
+        normalized.action !== undefined &&
+        normalized.action !== null &&
+        typeof normalized.action === "object" &&
+        !("event" in (normalized.action as Record<string, unknown>))
+      ) {
+        const actionObj = normalized.action as Record<string, unknown>;
+        // 提取 event name：优先 action.type，其次 action.name，默认 "action"
+        const eventName =
+          (typeof actionObj.type === "string" ? actionObj.type : undefined) ??
+          (typeof actionObj.name === "string" ? actionObj.name : undefined) ??
+          "action";
+        // 如果 action 已有 context 字段则复用，否则将整个 action 作为 context
+        const eventContext =
+          "context" in actionObj ? actionObj.context : actionObj;
+        normalized.action = {
+          event: { name: eventName, context: eventContext },
+        };
+        modified = true;
+      }
+
+      result.push(normalized);
+      // 如果 modified 为 true 但 text 处理已生成子组件，已在上面 push
+      // 这里不需要额外处理
+    } else {
+      result.push(comp);
+    }
+  }
+
+  return result;
+}
+
+/**
+ * 归一化 A2UI 消息中的 catalogId 和组件。
+ *
+ * catalogId：agent（storyboard）返回的 createSurface 消息中 catalogId 可能使用
  * "https://a2ui.dev/catalogs/basic_catalog"，但 basicCatalog.id 是
  * "https://a2ui.org/specification/v0_9/basic_catalog.json"。
  * 如果不替换会导致 MessageProcessor 抛出 Catalog not found 错误。
+ *
+ * 组件：对 updateComponents 中的 Button 组件做 text→child 和 action 包装兼容。
  */
 function normalizeA2UIMessage(msg: A2uiMessage): A2uiMessage {
+  let result = msg;
+
+  // catalogId 归一化
   if (
     msg.createSurface &&
     typeof msg.createSurface === "object" &&
     "catalogId" in msg.createSurface &&
     msg.createSurface.catalogId !== basicCatalog.id
   ) {
-    return {
-      ...msg,
+    result = {
+      ...result,
       createSurface: {
         ...msg.createSurface,
         catalogId: basicCatalog.id,
       },
     };
   }
-  return msg;
+
+  // 组件归一化
+  if (
+    result.updateComponents &&
+    typeof result.updateComponents === "object" &&
+    "components" in result.updateComponents &&
+    Array.isArray(result.updateComponents.components)
+  ) {
+    result = {
+      ...result,
+      updateComponents: {
+        ...result.updateComponents,
+        components: normalizeComponents(
+          result.updateComponents.components as Record<string, unknown>[],
+        ),
+      },
+    };
+  }
+
+  return result;
 }
 
 /**

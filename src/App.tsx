@@ -49,10 +49,11 @@ function AppWithA2UI() {
       const userMessage = JSON.stringify({ userAction: action });
 
       // 2. 添加用户操作消息到左侧对话（方便调试追踪）
+      const actionName = (action as Record<string, unknown>).name ?? "unknown";
       const actionMessage: Message = {
         id: crypto.randomUUID(),
         role: "user",
-        content: `[A2UI Action] ${(action as Record<string, unknown>).userAction?.actionName ?? "unknown"}`,
+        content: `[A2UI Action] ${actionName}`,
         timestamp: Date.now(),
       };
       dispatch({ type: "ADD_MESSAGE", payload: actionMessage });
