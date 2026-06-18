@@ -57,6 +57,7 @@ function AppWithA2UI() {
         timestamp: Date.now(),
       };
       dispatch({ type: "ADD_MESSAGE", payload: actionMessage });
+      console.log('[Chat] 发送消息:', userMessage);
 
       // 3. 重置行缓冲区
       lineBufferRef.current = "";
@@ -73,6 +74,7 @@ function AppWithA2UI() {
 
           // 文本行追加到左侧对话气泡
           if (textLines.length > 0) {
+            console.log('[Chat] 接收 chunk:', textLines.join('\n'));
             dispatch({
               type: "APPEND_STREAM",
               payload: textLines.join("\n"),
@@ -102,6 +104,7 @@ function AppWithA2UI() {
           payload: "抱歉，操作处理出错了，请重试。",
         });
       } finally {
+        console.log('[Chat] 流式接收完成');
         dispatch({ type: "FINISH_STREAM" });
       }
     });
@@ -129,12 +132,12 @@ function AppWithA2UI() {
     <MarkdownContext.Provider value={renderMarkdown}>
       <div className="flex flex-col md:flex-row h-screen w-screen bg-gray-50">
         {/* 左侧聊天面板 */}
-        <aside className="w-full md:w-1/2 shrink-0 border-b md:border-b-0 md:border-r border-gray-200">
+        <aside className="w-full md:w-1/5 shrink-0 border-b md:border-b-0 md:border-r border-gray-200">
           <ChatPanel processor={processor} />
         </aside>
 
         {/* 右侧 A2UI 面板 */}
-        <main className="w-full md:w-1/2 overflow-hidden">
+        <main className="w-full md:w-4/5 overflow-hidden">
           <A2UIPanel surfaces={surfaces} />
         </main>
       </div>

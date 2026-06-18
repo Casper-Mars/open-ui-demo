@@ -35,6 +35,7 @@ export default function ChatPanel({
         timestamp: Date.now(),
       };
       dispatch({ type: "ADD_MESSAGE", payload: userMessage });
+      console.log('[Chat] 发送消息:', text);
 
       // 2. 重置行缓冲区
       lineBufferRef.current = "";
@@ -52,6 +53,7 @@ export default function ChatPanel({
 
           // 文本行追加到左侧对话气泡
           if (textLines.length > 0) {
+            console.log('[Chat] 接收 chunk:', textLines.join('\n'));
             dispatch({
               type: "APPEND_STREAM",
               payload: textLines.join("\n"),
@@ -78,6 +80,7 @@ export default function ChatPanel({
         console.error("流式聊天出错:", err);
         dispatch({ type: "APPEND_STREAM", payload: "抱歉，回复出错了，请重试。" });
       } finally {
+        console.log('[Chat] 流式接收完成');
         dispatch({ type: "FINISH_STREAM" });
       }
     },
