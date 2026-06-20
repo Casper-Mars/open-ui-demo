@@ -2,6 +2,12 @@
 
 基于 **A2UI（Agent-to-User Interface）** 的 AI 聊天 + 交互界面渲染 Demo。左侧聊天面板通过 SSE 流式对话与 AI 交互，右侧面板实时渲染 AI 返回的 A2UI 交互界面（表单、卡片、按钮等），并支持用户操作回传（A2UI Action）。
 
+## 前置依赖
+
+本项目依赖 **OpenClaw** 作为 Agent 后端，需要配置 `OPENCLAW_GATEWAY_TOKEN` 环境变量。
+
+将 `ref/` 目录下的 Agent 配置文件复制到你的 OpenClaw 配置目录中，即可创建对应的 Agent。
+
 ## 技术栈
 
 | 技术 | 版本 |
